@@ -37,8 +37,9 @@ class TorchRadioModelConfig(fout.TorchImageModelConfig):
         self.model_version = self.parse_string(d, "model_version", default="c-radio_v3-h")
         self.model_path = self.parse_string(d, "model_path")
         self.output_type = self.parse_string(d, "output_type", default="summary")
-        self.feature_format = self.parse_string(d, "feature_format", default="NCHW")
+        self.feature_format = self.parse_string(d, "feature_format", default="NLC")
         self.use_external_preprocessor = self.parse_bool(d, "use_external_preprocessor", default=False)
+        self.use_mixed_precision = self.parse_bool(d, "use_mixed_precision", default=True)
 
 
 class TorchRadioModel(fout.TorchImageModel):
@@ -57,6 +58,22 @@ class TorchRadioModel(fout.TorchImageModel):
             self._conditioner = self._radio_model.make_preprocessor_external()
         else:
             self._conditioner = None
+            
+    def _check_mixed_precision_support(self):
+        """Check if the current GPU supports mixed precision with bfloat16."""
+        if not self._using_gpu:
+            return False
+            
+        try:
+            # Check GPU capability
+            if torch.cuda.is_available():
+                device_capability = torch.cuda.get_device_capability(self._device)
+                # bfloat16 is supported on Ampere (8.0+) and newer architectures
+                return device_capability[0] >= 8
+            return False
+        except Exception as e:
+            logger.warning(f"Could not determine mixed precision support: {e}")
+            return False
 
     def _load_model(self, config):
         """Load the RADIO model from disk."""
@@ -185,9 +202,17 @@ class TorchRadioModel(fout.TorchImageModel):
                     img_resized = self._conditioner(img_resized)
                     logger.debug(f"Image {i} after conditioning device: {img_resized.device}")
                 
-                # Forward pass
-                with torch.no_grad():
-                    summary, spatial = self._radio_model(img_resized, feature_fmt=self.config.feature_format)
+                # Forward pass with optional mixed precision
+                use_mixed_precision = (self.config.use_mixed_precision and 
+                                     self._mixed_precision_supported and 
+                                     self._using_gpu)
+                
+                if use_mixed_precision:
+                    with torch.autocast('cuda', dtype=torch.bfloat16):
+                        summary, spatial = self._radio_model(img_resized, feature_fmt=self.config.feature_format)
+                else:
+                    with torch.no_grad():
+                        summary, spatial = self._radio_model(img_resized, feature_fmt=self.config.feature_format)
                 
                 logger.debug(f"Image {i} output devices - summary: {summary.device}, spatial: {spatial.device}")
                 
@@ -330,3 +355,23 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
             heatmaps.append(heatmap_label)
         
         return heatmaps
+    
+    def _find_best_grid_dimensions(self, num_patches, target_aspect_ratio):
+        """Find the best grid dimensions that match the target aspect ratio."""
+        import math
+        
+        # Find all factor pairs of num_patches
+        factors = []
+        for i in range(1, int(math.sqrt(num_patches)) + 1):
+            if num_patches % i == 0:
+                height, width = i, num_patches // i
+                factors.append((height, width))
+        
+        if not factors:
+            # Fallback to square-ish
+            grid_size = int(math.sqrt(num_patches))
+            return grid_size, grid_size
+        
+        # Find the factor pair with aspect ratio closest to target
+        best_factors = min(factors, key=lambda hw: abs((hw[1] / hw[0]) - target_aspect_ratio))
+        return best_factors
