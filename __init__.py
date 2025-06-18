@@ -103,7 +103,7 @@ def load_model(
         "use_external_preprocessor": use_external_preprocessor,
         "raw_inputs": True,  # We handle preprocessing ourselves
         "as_feature_extractor": True,  # For embeddings extraction
-        "output_processor_cls": "radio_zoo.zoo.RadioOutputProcessor",
+        "output_processor_cls": "zoo.RadioOutputProcessor",
         **kwargs
     })
     
