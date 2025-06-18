@@ -300,95 +300,33 @@ class RadioOutputProcessor(fout.OutputProcessor):
 
 
 class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
-    """Output processor for RADIO spatial features that creates heatmaps using PCA."""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
     def __call__(self, output, frame_sizes, confidence_thresh=None):
-        """Process RADIO spatial output into FiftyOne heatmaps using PCA.
-        
-        Args:
-            output: spatial tensor from RADIO model, shape [batch_size, num_patches, feature_dim]
-            frame_sizes: list of (width, height) of original images
-            confidence_thresh: not used for heatmaps
-            
-        Returns:
-            list of fo.Heatmap instances
-        """
- 
+        # output: [B, C, H, W]
         batch_size = output.shape[0]
         heatmaps = []
-        
-        # Handle both single frame_size and batch of frame_sizes
-        if isinstance(frame_sizes[0], (int, float)):
-            # Single frame_size for all images
-            frame_sizes = [frame_sizes] * batch_size
-        
+
         for i in range(batch_size):
-            # Extract spatial features: [num_patches, feature_dim]
-            spatial_features = output[i].detach().cpu().numpy()
-            num_patches, feature_dim = spatial_features.shape
+            spatial = output[i].detach().cpu().numpy()  # [C, H, W]
             
-            # Apply PCA to reduce features to 1D attention
+            # Reduce over channels using PCA or mean
+            C, H, W = spatial.shape
+            reshaped = spatial.reshape(C, -1).T  # [H*W, C]
+
+            # Use PCA to reduce channels to 1D attention map
             pca = PCA(n_components=1)
-            attention_1d = pca.fit_transform(spatial_features)  # [num_patches, 1]
-            attention_1d = attention_1d.squeeze()  # [num_patches]
-            
-            # Determine spatial grid dimensions
-            # For square patches: sqrt(num_patches) should give us grid size
-            grid_size = int(math.sqrt(num_patches))
-            
-            # Check if it's a perfect square
-            if grid_size * grid_size == num_patches:
-                # Perfect square - simple reshape
-                attention_2d = attention_1d.reshape(grid_size, grid_size)
+            attention_1d = pca.fit_transform(reshaped).reshape(H, W)
+
+            # Resize to original frame size
+            orig_w, orig_h = frame_sizes[i]
+            attention_resized = resize(attention_1d, (orig_h, orig_w), preserve_range=True)
+
+            # Normalize
+            att_min, att_max = attention_resized.min(), attention_resized.max()
+            if att_max > att_min:
+                attention_norm = ((attention_resized - att_min) / (att_max - att_min) * 255).astype(np.uint8)
             else:
-                # Not a perfect square - estimate dimensions
-                # Try to find the closest rectangular dimensions
-                height = int(math.sqrt(num_patches))
-                width = num_patches // height
-                
-                # Handle remainder patches by adjusting dimensions
-                while height * width < num_patches and height > 1:
-                    height -= 1
-                    width = num_patches // height
-                
-                # Truncate to fit the grid if necessary
-                valid_patches = height * width
-                attention_truncated = attention_1d[:valid_patches]
-                attention_2d = attention_truncated.reshape(height, width)
-            
-            # Get original image dimensions
-            original_width, original_height = frame_sizes[i]
-            
-            # Resize attention map to match original image dimensions
-            if attention_2d.shape != (original_height, original_width):
-                resized_heatmap = resize(
-                    attention_2d, 
-                    (original_height, original_width), 
-                    preserve_range=True,
-                    anti_aliasing=True
-                )
-            else:
-                resized_heatmap = attention_2d
-            
-            # Normalize and convert to uint8 in one step for efficiency
-            heatmap_min = resized_heatmap.min()
-            heatmap_max = resized_heatmap.max()
-            
-            if heatmap_max > heatmap_min:
-                # Single step: scale directly from original range to [0, 255]
-                uint8_heatmap = ((resized_heatmap - heatmap_min) / (heatmap_max - heatmap_min) * 255).astype(np.uint8)
-            else:
-                # Handle constant heatmap
-                uint8_heatmap = np.zeros_like(resized_heatmap, dtype=np.uint8)
-            
-            # Create FiftyOne heatmap with uint8 data and proper range
-            heatmap_label = fol.Heatmap(
-                map=uint8_heatmap,
-                range=[0, 255]  # Set range for uint8 values
-            )
-            heatmaps.append(heatmap_label)
-        
+                attention_norm = np.zeros_like(attention_resized, dtype=np.uint8)
+
+            heatmaps.append(fol.Heatmap(map=attention_norm, range=[0, 255]))
+
         return heatmaps
