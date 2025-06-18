@@ -22,7 +22,7 @@ class TorchRadioModelConfig(fout.TorchImageModelConfig):
     Args:
         model_version: the RADIO model version to load
         model_path: path to the saved model file on disk
-        output_type: what to return - "summary", "spatial", or "both"
+        output_type: what to return - "summary", "spatial"
         feature_format: "NCHW" or "NLC" for spatial features format
         use_external_preprocessor: whether to use external preprocessing
     """
@@ -171,11 +171,6 @@ class TorchRadioModel(fout.TorchImageModel):
             output = batch_summary
         elif self.config.output_type == "spatial":
             output = batch_spatial
-        elif self.config.output_type == "both":
-            output = {
-                "summary": batch_summary,
-                "spatial": batch_spatial
-            }
         else:
             raise ValueError(f"Unknown output_type: {self.config.output_type}")
         

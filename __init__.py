@@ -130,7 +130,7 @@ def resolve_input(model_name, ctx):
     
     inputs.enum(
         "output_type",
-        ["summary", "spatial", "both"],
+        ["summary", "spatial"],
         default="summary",
         label="Output Type",
         description="Type of features to extract: summary (global), spatial (local), or both"
