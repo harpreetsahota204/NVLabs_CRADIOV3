@@ -78,7 +78,8 @@ class TorchRadioModel(fout.TorchImageModel):
         
         # Load the saved state dict
         model.load_state_dict(checkpoint['model_state_dict'])
-        
+        model = model.to(self._device)
+        model.eval()
         return model
 
     def _load_radio_model(self):
@@ -149,10 +150,6 @@ class TorchRadioModel(fout.TorchImageModel):
             # Get nearest supported resolution and resize
             nearest_res = self._radio_model.get_nearest_supported_resolution(*img.shape[-2:])
             img_resized = F.interpolate(img, nearest_res, mode='bilinear', align_corners=False)
-            
-            # Set optimal window size for E-RADIO models
-            if "e-radio" in self.config.model_version:
-                self._radio_model.model.set_optimal_window_size(img_resized.shape[2:])
             
             # Apply external conditioning if using external preprocessor
             if self._conditioner is not None:
