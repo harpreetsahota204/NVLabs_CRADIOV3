@@ -1,0 +1,90 @@
+{
+    "name": "C-RADIOv3",
+    "url": "https://github.com/harpreetsahota204/NVLabs_CRADIOV3",
+    "models": [
+        {
+            "base_name": "nv_labs/c-radio_v3-g",
+            "base_filename":"c-radio_v3-g",
+            "author": "NVIDIA",
+            "license": "NVIDIA Source Code License-NC",
+            "source": "https://github.com/NVlabs/RADIO/blob/main/README.md",
+            "description": "C-RADIOv3-g model (ViT-H/14)",
+            "tags": [
+                "embeddings"
+            ],
+            "date_added": "2025-06-18",
+            "requirements": {
+                "packages": ["torch", "torchvision"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        },
+        {
+            "base_name": "nv_labs/c-radio_v3-h",
+            "base_filename":"c-radio_v3-h",
+            "author": "NVIDIA",
+            "license": "NVIDIA Source Code License-NC",
+            "source": "https://github.com/NVlabs/RADIO/blob/main/README.md",
+            "description": "C-RADIOv3-H model (ViT-H/16)",
+            "tags": [
+                "embeddings"
+            ],
+            "date_added": "2025-06-18",
+            "requirements": {
+                "packages": ["torch", "torchvision"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        },
+        {
+            "base_name": "nv_labs/c-radio_v3-l",
+            "base_filename":"c-radio_v3-l",
+            "author": "NVIDIA",
+            "license": "NVIDIA Source Code License-NC",
+            "source": "https://github.com/NVlabs/RADIO/blob/main/README.md",
+            "description": "C-RADIOv3-L model (ViT-L/16))",
+            "tags": [
+                "embeddings"
+            ],
+            "date_added": "2025-06-18",
+            "requirements": {
+                "packages": ["torch", "torchvision"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        },
+        {
+            "base_name": "nv_labs/c-radio_v3-b",
+            "base_filename":"c-radio_v3-b",
+            "author": "NVIDIA",
+            "license": "NVIDIA Source Code License-NC",
+            "source": "https://github.com/NVlabs/RADIO/blob/main/README.md",
+            "description": "C-RADIOv3-B model (ViT-B/16)",
+            "tags": [
+                "embeddings"
+            ],
+            "date_added": "2025-06-18",
+            "requirements": {
+                "packages": ["torch", "torchvision"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        }
+    ]
+}
