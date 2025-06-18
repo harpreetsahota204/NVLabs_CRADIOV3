@@ -1,5 +1,7 @@
 # NVLabs C-RADIO Models for FiftyOne
 
+![RADIO Models in FiftyOne](cradio-fiftyone.gif)
+
 This repository provides FiftyOne integration for C-RADIO models from NVIDIA Labs. RADIO models are state-of-the-art models that produce rich spatial features and global summaries, making them excellent for image embeddings, similarity search, attention visualization, and downstream computer vision tasks.
 
 ## 🚀 Features
