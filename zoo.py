@@ -99,10 +99,6 @@ class TorchRadioModel(fout.TorchImageModel):
         # Load the saved state dict
         model.load_state_dict(checkpoint['model_state_dict'])
         
-        # Move to the correct device and set to eval mode
-        model = model.to(self._device)
-        model.eval()
-        
         return model
 
     def _load_radio_model(self):
@@ -304,54 +300,78 @@ class RadioOutputProcessor(fout.OutputProcessor):
 
 
 class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
-    """Output processor for RADIO spatial features that creates heatmaps."""
+    """Output processor for RADIO spatial features that creates heatmaps using PCA."""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-    def __call__(self, output, frame_size, confidence_thresh=None):
-        """Process RADIO spatial output into FiftyOne heatmaps.
+    def __call__(self, output, frame_sizes, confidence_thresh=None):
+        """Process RADIO spatial output into FiftyOne heatmaps using PCA.
         
         Args:
-            output: spatial tensor from RADIO model, shape [batch_size, H, W]
-            frame_size: (width, height) of original images
+            output: spatial tensor from RADIO model, shape [batch_size, num_patches, feature_dim]
+            frame_sizes: list of (width, height) of original images
             confidence_thresh: not used for heatmaps
             
         Returns:
             list of fo.Heatmap instances
         """
-        import fiftyone.core.labels as fol
-        from skimage.transform import resize
-        import numpy as np
-        
+ 
         batch_size = output.shape[0]
         heatmaps = []
         
         # Handle both single frame_size and batch of frame_sizes
-        if isinstance(frame_size[0], (int, float)):
+        if isinstance(frame_sizes[0], (int, float)):
             # Single frame_size for all images
-            frame_sizes = [frame_size] * batch_size
-        else:
-            # Batch of frame_sizes
-            frame_sizes = frame_size
+            frame_sizes = [frame_sizes] * batch_size
         
         for i in range(batch_size):
-            # Extract single heatmap and convert to numpy
-            heatmap_2d = output[i].detach().cpu().numpy()
+            # Extract spatial features: [num_patches, feature_dim]
+            spatial_features = output[i].detach().cpu().numpy()
+            num_patches, feature_dim = spatial_features.shape
             
-            # Get original image dimensions (width, height) -> (height, width)
+            # Apply PCA to reduce features to 1D attention
+            pca = PCA(n_components=1)
+            attention_1d = pca.fit_transform(spatial_features)  # [num_patches, 1]
+            attention_1d = attention_1d.squeeze()  # [num_patches]
+            
+            # Determine spatial grid dimensions
+            # For square patches: sqrt(num_patches) should give us grid size
+            grid_size = int(math.sqrt(num_patches))
+            
+            # Check if it's a perfect square
+            if grid_size * grid_size == num_patches:
+                # Perfect square - simple reshape
+                attention_2d = attention_1d.reshape(grid_size, grid_size)
+            else:
+                # Not a perfect square - estimate dimensions
+                # Try to find the closest rectangular dimensions
+                height = int(math.sqrt(num_patches))
+                width = num_patches // height
+                
+                # Handle remainder patches by adjusting dimensions
+                while height * width < num_patches and height > 1:
+                    height -= 1
+                    width = num_patches // height
+                
+                # Truncate to fit the grid if necessary
+                valid_patches = height * width
+                attention_truncated = attention_1d[:valid_patches]
+                attention_2d = attention_truncated.reshape(height, width)
+            
+            # Get original image dimensions
             original_width, original_height = frame_sizes[i]
             
-            # Resize heatmap to match original image dimensions
-            if heatmap_2d.shape != (original_height, original_width):
+            # Resize attention map to match original image dimensions
+            if attention_2d.shape != (original_height, original_width):
                 resized_heatmap = resize(
-                    heatmap_2d, 
+                    attention_2d, 
                     (original_height, original_width), 
                     preserve_range=True,
                     anti_aliasing=True
                 )
             else:
-                resized_heatmap = heatmap_2d
+                resized_heatmap = attention_2d
             
             # Normalize and convert to uint8 in one step for efficiency
             heatmap_min = resized_heatmap.min()
@@ -372,23 +392,3 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
             heatmaps.append(heatmap_label)
         
         return heatmaps
-    
-    def _find_best_grid_dimensions(self, num_patches, target_aspect_ratio):
-        """Find the best grid dimensions that match the target aspect ratio."""
-        import math
-        
-        # Find all factor pairs of num_patches
-        factors = []
-        for i in range(1, int(math.sqrt(num_patches)) + 1):
-            if num_patches % i == 0:
-                height, width = i, num_patches // i
-                factors.append((height, width))
-        
-        if not factors:
-            # Fallback to square-ish
-            grid_size = int(math.sqrt(num_patches))
-            return grid_size, grid_size
-        
-        # Find the factor pair with aspect ratio closest to target
-        best_factors = min(factors, key=lambda hw: abs((hw[1] / hw[0]) - target_aspect_ratio))
-        return best_factors
