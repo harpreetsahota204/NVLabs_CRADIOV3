@@ -16,6 +16,7 @@ import fiftyone.utils.torch as fout
 
 logger = logging.getLogger(__name__)
 
+
 class TorchRadioModelConfig(fout.TorchImageModelConfig):
     """Configuration for running a :class:`TorchRadioModel`.
 
@@ -157,6 +158,7 @@ class TorchRadioModel(fout.TorchImageModel):
         # Process each image individually due to dynamic resizing
         summaries = []
         spatial_features_list = []
+        grid_dimensions = []  # Track actual grid dimensions for spatial processing
         
         for i, img in enumerate(imgs):
             try:
@@ -173,7 +175,14 @@ class TorchRadioModel(fout.TorchImageModel):
                 nearest_res = self._radio_model.get_nearest_supported_resolution(*img.shape[-2:])
                 img_resized = F.interpolate(img, nearest_res, mode='bilinear', align_corners=False)
                 
+                # Calculate actual grid dimensions for spatial features
+                patch_size = self._radio_model.patch_size
+                grid_height = nearest_res.height // patch_size
+                grid_width = nearest_res.width // patch_size
+                grid_dimensions.append((grid_height, grid_width))
+                
                 logger.debug(f"Image {i} resized device: {img_resized.device}")
+                logger.debug(f"Image {i} grid dimensions: {grid_height}x{grid_width}")
                 
                 # Set optimal window size for E-RADIO models
                 if "e-radio" in self.config.model_version:
@@ -220,11 +229,27 @@ class TorchRadioModel(fout.TorchImageModel):
         
         # Process output if we have an output processor
         if self._output_processor is not None:
-            frame_size = imgs[0].shape[-2:]  # (H, W)
-            frame_size = (frame_size[1], frame_size[0])  # Convert to (W, H)
-            return self._output_processor(
-                output, frame_size
-            )
+            # Collect original frame sizes for batch
+            frame_sizes = []
+            for img in imgs:
+                if hasattr(img, 'shape') and len(img.shape) >= 2:
+                    h, w = img.shape[-2:]
+                    frame_sizes.append((w, h))  # (width, height) format
+                else:
+                    # Fallback - this shouldn't happen but just in case
+                    frame_sizes.append((224, 224))
+            
+            # Pass grid dimensions for spatial processing
+            if self.config.output_type == "spatial":
+                return self._output_processor(
+                    output, frame_sizes, 
+                    grid_dimensions=grid_dimensions,
+                    confidence_thresh=self.config.confidence_thresh
+                )
+            else:
+                return self._output_processor(
+                    output, frame_sizes, confidence_thresh=self.config.confidence_thresh
+                )
         
         # Return raw features as numpy arrays for embeddings
         return [output[i].detach().cpu().numpy() for i in range(len(imgs))]
@@ -251,79 +276,56 @@ class RadioOutputProcessor(fout.OutputProcessor):
         batch_size = output.shape[0]
         return [output[i].detach().cpu().numpy() for i in range(batch_size)]
 
+
 class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
-    """Output processor for RADIO spatial features that creates heatmaps using PCA."""
+    """Output processor for RADIO spatial features that creates heatmaps."""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-    def __call__(self, output, frame_sizes, confidence_thresh=None):
-        """Process RADIO spatial output into FiftyOne heatmaps using PCA.
+    def __call__(self, output, frame_size, confidence_thresh=None):
+        """Process RADIO spatial output into FiftyOne heatmaps.
         
         Args:
-            output: spatial tensor from RADIO model, shape [batch_size, num_patches, feature_dim]
-            frame_sizes: list of (width, height) of original images
+            output: spatial tensor from RADIO model, shape [batch_size, H, W]
+            frame_size: (width, height) of original images
             confidence_thresh: not used for heatmaps
             
         Returns:
             list of fo.Heatmap instances
         """
- 
+        import fiftyone.core.labels as fol
+        from skimage.transform import resize
+        import numpy as np
+        
         batch_size = output.shape[0]
         heatmaps = []
         
         # Handle both single frame_size and batch of frame_sizes
-        if isinstance(frame_sizes[0], (int, float)):
+        if isinstance(frame_size[0], (int, float)):
             # Single frame_size for all images
-            frame_sizes = [frame_sizes] * batch_size
+            frame_sizes = [frame_size] * batch_size
+        else:
+            # Batch of frame_sizes
+            frame_sizes = frame_size
         
         for i in range(batch_size):
-            # Extract spatial features: [num_patches, feature_dim]
-            spatial_features = output[i].detach().cpu().numpy()
-            num_patches, feature_dim = spatial_features.shape
+            # Extract single heatmap and convert to numpy
+            heatmap_2d = output[i].detach().cpu().numpy()
             
-            # Apply PCA to reduce features to 1D attention
-            pca = PCA(n_components=1)
-            attention_1d = pca.fit_transform(spatial_features)  # [num_patches, 1]
-            attention_1d = attention_1d.squeeze()  # [num_patches]
-            
-            # Determine spatial grid dimensions
-            # For square patches: sqrt(num_patches) should give us grid size
-            grid_size = int(math.sqrt(num_patches))
-            
-            # Check if it's a perfect square
-            if grid_size * grid_size == num_patches:
-                # Perfect square - simple reshape
-                attention_2d = attention_1d.reshape(grid_size, grid_size)
-            else:
-                # Not a perfect square - estimate dimensions
-                # Try to find the closest rectangular dimensions
-                height = int(math.sqrt(num_patches))
-                width = num_patches // height
-                
-                # Handle remainder patches by adjusting dimensions
-                while height * width < num_patches and height > 1:
-                    height -= 1
-                    width = num_patches // height
-                
-                # Truncate to fit the grid if necessary
-                valid_patches = height * width
-                attention_truncated = attention_1d[:valid_patches]
-                attention_2d = attention_truncated.reshape(height, width)
-            
-            # Get original image dimensions
+            # Get original image dimensions (width, height) -> (height, width)
             original_width, original_height = frame_sizes[i]
             
-            # Resize attention map to match original image dimensions
-            if attention_2d.shape != (original_height, original_width):
+            # Resize heatmap to match original image dimensions
+            if heatmap_2d.shape != (original_height, original_width):
                 resized_heatmap = resize(
-                    attention_2d, 
+                    heatmap_2d, 
                     (original_height, original_width), 
                     preserve_range=True,
                     anti_aliasing=True
                 )
             else:
-                resized_heatmap = attention_2d
+                resized_heatmap = heatmap_2d
             
             # Normalize and convert to uint8 in one step for efficiency
             heatmap_min = resized_heatmap.min()
@@ -344,3 +346,30 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
             heatmaps.append(heatmap_label)
         
         return heatmaps
+    
+    def _estimate_grid_reshape(self, attention_1d, num_patches):
+        """Fallback method to estimate grid dimensions when actual dimensions aren't available."""
+        import math
+        
+        # For square patches: sqrt(num_patches) should give us grid size
+        grid_size = int(math.sqrt(num_patches))
+        
+        # Check if it's a perfect square
+        if grid_size * grid_size == num_patches:
+            # Perfect square - simple reshape
+            return attention_1d.reshape(grid_size, grid_size)
+        else:
+            # Not a perfect square - estimate dimensions
+            # Try to find the closest rectangular dimensions
+            height = int(math.sqrt(num_patches))
+            width = num_patches // height
+            
+            # Handle remainder patches by adjusting dimensions
+            while height * width < num_patches and height > 1:
+                height -= 1
+                width = num_patches // height
+            
+            # Truncate to fit the grid if necessary
+            valid_patches = height * width
+            attention_truncated = attention_1d[:valid_patches]
+            return attention_truncated.reshape(height, width)
