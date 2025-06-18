@@ -41,7 +41,7 @@ class TorchRadioModelConfig(fout.TorchImageModelConfig):
         self.use_external_preprocessor = self.parse_bool(d, "use_external_preprocessor", default=False)
         self.use_mixed_precision = self.parse_bool(d, "use_mixed_precision", default=True)
         self.apply_smoothing = self.parse_bool(d, "apply_smoothing", default=True)
-        self.smoothing_sigma = self.parse_number(d, "heatmap_sigma", default=1.51)
+        self.smoothing_sigma = self.parse_number(d, "smoothing_sigma", default=1.51)
 
 class TorchRadioModel(fout.TorchImageModel):
     """Wrapper for RADIO models from https://github.com/NVlabs/RADIO.
