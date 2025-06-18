@@ -283,7 +283,7 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-    def __call__(self, output, frame_size, confidence_thresh=None):
+    def __call__(self, output, frame_size, grid_dimensions=None, confidence_thresh=None):
         """Process RADIO spatial output into FiftyOne heatmaps.
         
         Args:
@@ -294,9 +294,6 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
         Returns:
             list of fo.Heatmap instances
         """
-        import fiftyone.core.labels as fol
-        from skimage.transform import resize
-        import numpy as np
         
         batch_size = output.shape[0]
         heatmaps = []
