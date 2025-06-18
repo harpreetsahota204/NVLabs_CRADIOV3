@@ -117,7 +117,10 @@ def load_model(
     elif output_type == "spatial":
         # For heatmaps
         config_dict["output_processor_cls"] = "zoo.SpatialHeatmapOutputProcessor"
-        config_dict["output_processor_args"] = {}
+        config_dict["output_processor_args"] = {
+            "apply_smoothing": kwargs.get("apply_smoothing", True),
+            "smoothing_sigma": kwargs.get("smoothing_sigma", 1.51),
+        }
     else:
         raise ValueError(f"Unsupported output_type: {output_type}. Use 'summary' or 'spatial'")
     
@@ -164,5 +167,19 @@ def resolve_input(model_name, ctx):
         label="Use External Preprocessor",
         description="Whether to use external preprocessing (advanced option)"
     )
-    
+
+    inputs.bool(
+        "apply_smoothing",
+        default=True,
+        label="Apply Gaussian Smoothing",
+        description="Whether to smooth the spatial heatmaps for better visualization"
+    )
+
+    inputs.float(
+        "smoothing_sigma",
+        default=1.0,
+        label="Smoothing Sigma",
+        description="The standard deviation (sigma) for Gaussian blur applied to heatmaps"
+    )
+
     return types.Property(inputs)

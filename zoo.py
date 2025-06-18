@@ -37,10 +37,11 @@ class TorchRadioModelConfig(fout.TorchImageModelConfig):
         self.model_version = self.parse_string(d, "model_version", default="c-radio_v3-h")
         self.model_path = self.parse_string(d, "model_path")
         self.output_type = self.parse_string(d, "output_type", default="summary")
-        self.feature_format = self.parse_string(d, "feature_format", default="NLC")
+        self.feature_format = self.parse_string(d, "feature_format", default="NCHW")
         self.use_external_preprocessor = self.parse_bool(d, "use_external_preprocessor", default=False)
         self.use_mixed_precision = self.parse_bool(d, "use_mixed_precision", default=True)
-
+        self.apply_smoothing = self.parse_bool(d, "apply_smoothing", default=True)
+        self.smoothing_sigma = self.parse_number(d, "heatmap_sigma", default=1.51)
 
 class TorchRadioModel(fout.TorchImageModel):
     """Wrapper for RADIO models from https://github.com/NVlabs/RADIO.
@@ -299,36 +300,67 @@ class RadioOutputProcessor(fout.OutputProcessor):
         batch_size = output.shape[0]
         return [output[i].detach().cpu().numpy() for i in range(batch_size)]
 
-
 class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
+    """Improved spatial heatmap processor for RADIO with NCHW features and smoothing."""
+
+    def __init__(self, apply_smoothing=True, smoothing_sigma=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.apply_smoothing = apply_smoothing
+        self.smoothing_sigma = smoothing_sigma
+
     def __call__(self, output, frame_sizes, confidence_thresh=None):
-        # output: [B, C, H, W]
+        """
+        Args:
+            output: torch.Tensor of shape [B, C, H, W]
+            frame_sizes: list of (width, height) for each image
+            confidence_thresh: unused
+
+        Returns:
+            List of fol.Heatmap instances
+        """
         batch_size = output.shape[0]
         heatmaps = []
 
         for i in range(batch_size):
             spatial = output[i].detach().cpu().numpy()  # [C, H, W]
-            
-            # Reduce over channels using PCA or mean
             C, H, W = spatial.shape
+
+            # Flatten spatial grid to [H*W, C] for PCA
             reshaped = spatial.reshape(C, -1).T  # [H*W, C]
 
-            # Use PCA to reduce channels to 1D attention map
-            pca = PCA(n_components=1)
-            attention_1d = pca.fit_transform(reshaped).reshape(H, W)
-            attention_1d = gaussian_filter(attention_1d, sigma=1.0)
+            try:
+                # PCA to reduce channels to 1D attention per pixel
+                pca = PCA(n_components=1)
+                attention_1d = pca.fit_transform(reshaped).reshape(H, W)
+            except Exception as e:
+                # Fallback to simple mean over channels
+                warnings.warn(f"PCA failed on image {i}: {e}. Falling back to channel mean.")
+                attention_1d = spatial.mean(axis=0)  # [H, W]
 
-            # Resize to original frame size
+            # Optional smoothing
+            if self.apply_smoothing:
+                attention_1d = gaussian_filter(attention_1d, sigma=self.smoothing_sigma)
+
+            # Resize to match original image dimensions
             orig_w, orig_h = frame_sizes[i]
-            attention_resized = resize(attention_1d, (orig_h, orig_w), preserve_range=True)
+            attention_resized = resize(
+                attention_1d,
+                (orig_h, orig_w),
+                preserve_range=True,
+                anti_aliasing=True
+            )
 
-            # Normalize
+            # Normalize to uint8 [0, 255]
             att_min, att_max = attention_resized.min(), attention_resized.max()
             if att_max > att_min:
-                attention_norm = ((attention_resized - att_min) / (att_max - att_min) * 255).astype(np.uint8)
+                attention_uint8 = ((attention_resized - att_min) / (att_max - att_min) * 255).astype(np.uint8)
             else:
-                attention_norm = np.zeros_like(attention_resized, dtype=np.uint8)
+                attention_uint8 = np.zeros_like(attention_resized, dtype=np.uint8)
 
-            heatmaps.append(fol.Heatmap(map=attention_norm, range=[0, 255]))
+            heatmap = fol.Heatmap(
+                map=attention_uint8,
+                range=[0, 255]
+            )
+            heatmaps.append(heatmap)
 
         return heatmaps
