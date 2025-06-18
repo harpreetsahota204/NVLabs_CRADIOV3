@@ -36,6 +36,9 @@ def download_model(model_name, model_path):
         raise ValueError(f"Unsupported model name '{model_name}'. "
                         f"Supported models: {list(MODEL_VARIANTS.keys())}")
     
+    import os
+    import torch
+    
     model_info = MODEL_VARIANTS[model_name]
     model_version = model_info["model_version"]
     
@@ -80,7 +83,7 @@ def load_model(
         model_path: the absolute filename or directory to which the model was
             downloaded, as declared by the ``base_filename`` field of the
             manifest
-        output_type: what to return - "summary", "spatial", or "both"
+        output_type: what to return - "summary" or "spatial"
         feature_format: "NCHW" or "NLC" for spatial features format
         use_external_preprocessor: whether to use external preprocessing
         **kwargs: additional keyword arguments
@@ -95,20 +98,31 @@ def load_model(
     model_info = MODEL_VARIANTS[model_name]
     model_version = model_info["model_version"]
     
-    config = TorchRadioModelConfig({
+    config_dict = {
         "model_version": model_version,
         "model_path": model_path,  # Add the model path for loading from disk
         "output_type": output_type,
         "feature_format": feature_format,
         "use_external_preprocessor": use_external_preprocessor,
         "raw_inputs": True,  # We handle preprocessing ourselves
-        "as_feature_extractor": True,  # For embeddings extraction
-        "output_processor_cls": "zoo.RadioOutputProcessor",
         **kwargs
-    })
+    }
     
+    # Set up output processor based on output type
+    if output_type == "summary":
+        # For embeddings
+        config_dict["as_feature_extractor"] = True
+        config_dict["output_processor_cls"] = "zoo.RadioOutputProcessor"
+        config_dict["output_processor_args"] = {"output_type": output_type}
+    elif output_type == "spatial":
+        # For heatmaps
+        config_dict["output_processor_cls"] = "zoo.SpatialHeatmapOutputProcessor"
+        config_dict["output_processor_args"] = {}
+    else:
+        raise ValueError(f"Unsupported output_type: {output_type}. Use 'summary' or 'spatial'")
+    
+    config = TorchRadioModelConfig(config_dict)
     return TorchRadioModel(config)
-
 
 def resolve_input(model_name, ctx):
     """Defines any necessary properties to collect the model's custom
@@ -133,7 +147,7 @@ def resolve_input(model_name, ctx):
         ["summary", "spatial"],
         default="summary",
         label="Output Type",
-        description="Type of features to extract: summary (global), spatial (local), or both"
+        description="Type of features to extract: summary (global embeddings) or spatial (heatmaps)"
     )
     
     inputs.enum(
