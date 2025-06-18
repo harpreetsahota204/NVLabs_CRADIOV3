@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from scipy.ndimage import gaussian_filter
 from skimage.transform import resize
 from sklearn.decomposition import PCA
 from torchvision.transforms.functional import pil_to_tensor
@@ -315,6 +316,7 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
             # Use PCA to reduce channels to 1D attention map
             pca = PCA(n_components=1)
             attention_1d = pca.fit_transform(reshaped).reshape(H, W)
+            attention_1d = gaussian_filter(attention_1d, sigma=1.0)
 
             # Resize to original frame size
             orig_w, orig_h = frame_sizes[i]
