@@ -1,12 +1,14 @@
 import logging
+import math
 import warnings
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision.transforms.functional import pil_to_tensor
-import numpy as np
 from PIL import Image
 from skimage.transform import resize
+from sklearn.decomposition import PCA
+from torchvision.transforms.functional import pil_to_tensor
 
 import fiftyone.core.labels as fol
 import fiftyone.core.models as fom
@@ -250,29 +252,25 @@ class RadioOutputProcessor(fout.OutputProcessor):
         return [output[i].detach().cpu().numpy() for i in range(batch_size)]
 
 class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
-    """Output processor for RADIO spatial features that creates heatmaps."""
+    """Output processor for RADIO spatial features that creates heatmaps using PCA."""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
     def __call__(self, output, frame_size, confidence_thresh=None):
-        """Process RADIO spatial output into FiftyOne heatmaps.
+        """Process RADIO spatial output into FiftyOne heatmaps using PCA.
         
         Args:
-            output: spatial tensor from RADIO model, shape [batch_size, H, W]
-            frame_size: (width, height) of original images
+            output: spatial tensor from RADIO model, shape [batch_size, num_patches, feature_dim]
+            frame_sizes: list of (width, height) of original images
             confidence_thresh: not used for heatmaps
             
         Returns:
             list of fo.Heatmap instances
         """
-        import fiftyone.core.labels as fol
-        from skimage.transform import resize
-        import numpy as np
-        
         batch_size = output.shape[0]
         heatmaps = []
-        
+      
         # Handle both single frame_size and batch of frame_sizes
         if isinstance(frame_size[0], (int, float)):
             # Single frame_size for all images
@@ -299,20 +297,16 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
             else:
                 resized_heatmap = heatmap_2d
             
-            # Normalize values to [0, 1] range first
+            # Normalize and convert to uint8 in one step for efficiency
             heatmap_min = resized_heatmap.min()
             heatmap_max = resized_heatmap.max()
             
             if heatmap_max > heatmap_min:
-                # Normalize to [0, 1]
-                normalized_heatmap = (resized_heatmap - heatmap_min) / (heatmap_max - heatmap_min)
+                # Single step: scale directly from original range to [0, 255]
+                uint8_heatmap = ((resized_heatmap - heatmap_min) / (heatmap_max - heatmap_min) * 255).astype(np.uint8)
             else:
                 # Handle constant heatmap
-                normalized_heatmap = np.zeros_like(resized_heatmap)
-            
-            # Convert to uint8 to reduce storage size by 4x
-            # Scale [0, 1] to [0, 255] and convert to uint8
-            uint8_heatmap = (normalized_heatmap * 255).astype(np.uint8)
+                uint8_heatmap = np.zeros_like(resized_heatmap, dtype=np.uint8)
             
             # Create FiftyOne heatmap with uint8 data and proper range
             heatmap_label = fol.Heatmap(
