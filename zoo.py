@@ -6,7 +6,9 @@ import torch.nn.functional as F
 from torchvision.transforms.functional import pil_to_tensor
 import numpy as np
 from PIL import Image
+from skimage.transform import resize
 
+import fiftyone.core.labels as fol
 import fiftyone.core.models as fom
 import fiftyone.utils.torch as fout
 
@@ -258,23 +260,61 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
         
         Args:
             output: spatial tensor from RADIO model, shape [batch_size, H, W]
-            frame_size: (width, height) - not used for heatmaps
+            frame_size: (width, height) of original images
             confidence_thresh: not used for heatmaps
             
         Returns:
             list of fo.Heatmap instances
         """
-        import fiftyone.core.labels as fol
         
         batch_size = output.shape[0]
         heatmaps = []
+        
+        # Handle both single frame_size and batch of frame_sizes
+        if isinstance(frame_size[0], (int, float)):
+            # Single frame_size for all images
+            frame_sizes = [frame_size] * batch_size
+        else:
+            # Batch of frame_sizes
+            frame_sizes = frame_size
         
         for i in range(batch_size):
             # Extract single heatmap and convert to numpy
             heatmap_2d = output[i].detach().cpu().numpy()
             
-            # Create FiftyOne heatmap
-            heatmap_label = fol.Heatmap(map=heatmap_2d)
+            # Get original image dimensions (width, height) -> (height, width)
+            original_width, original_height = frame_sizes[i]
+            
+            # Resize heatmap to match original image dimensions
+            if heatmap_2d.shape != (original_height, original_width):
+                resized_heatmap = resize(
+                    heatmap_2d, 
+                    (original_height, original_width), 
+                    preserve_range=True,
+                    anti_aliasing=True
+                )
+            else:
+                resized_heatmap = heatmap_2d
+            
+            # Normalize values to [0, 1] range
+            heatmap_min = resized_heatmap.min()
+            heatmap_max = resized_heatmap.max()
+            
+            if heatmap_max > heatmap_min:
+                # Normalize to [0, 1]
+                normalized_heatmap = (resized_heatmap - heatmap_min) / (heatmap_max - heatmap_min)
+            else:
+                # Handle constant heatmap
+                normalized_heatmap = np.zeros_like(resized_heatmap)
+            
+            # Ensure float32 for consistency
+            normalized_heatmap = normalized_heatmap.astype(np.float32)
+            
+            # Create FiftyOne heatmap with proper range
+            heatmap_label = fol.Heatmap(
+                map=normalized_heatmap,
+                range=[0.0, 1.0]  # Explicitly set range
+            )
             heatmaps.append(heatmap_label)
         
         return heatmaps
