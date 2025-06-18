@@ -266,6 +266,9 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
         Returns:
             list of fo.Heatmap instances
         """
+        import fiftyone.core.labels as fol
+        from skimage.transform import resize
+        import numpy as np
         
         batch_size = output.shape[0]
         heatmaps = []
@@ -296,7 +299,7 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
             else:
                 resized_heatmap = heatmap_2d
             
-            # Normalize values to [0, 1] range
+            # Normalize values to [0, 1] range first
             heatmap_min = resized_heatmap.min()
             heatmap_max = resized_heatmap.max()
             
@@ -307,13 +310,14 @@ class SpatialHeatmapOutputProcessor(fout.OutputProcessor):
                 # Handle constant heatmap
                 normalized_heatmap = np.zeros_like(resized_heatmap)
             
-            # Ensure float32 for consistency
-            normalized_heatmap = normalized_heatmap.astype(np.float32)
+            # Convert to uint8 to reduce storage size by 4x
+            # Scale [0, 1] to [0, 255] and convert to uint8
+            uint8_heatmap = (normalized_heatmap * 255).astype(np.uint8)
             
-            # Create FiftyOne heatmap with proper range
+            # Create FiftyOne heatmap with uint8 data and proper range
             heatmap_label = fol.Heatmap(
-                map=normalized_heatmap,
-                range=[0.0, 1.0]  # Explicitly set range
+                map=uint8_heatmap,
+                range=[0, 255]  # Set range for uint8 values
             )
             heatmaps.append(heatmap_label)
         
