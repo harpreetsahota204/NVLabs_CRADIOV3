@@ -263,6 +263,22 @@ class TorchRadioModel(fout.TorchImageModel):
         # Return raw features as numpy arrays for embeddings
         return [output[i].detach().cpu().numpy() for i in range(len(imgs))]
 
+    def _check_mixed_precision_support(self):
+        """Check if the current GPU supports mixed precision with bfloat16."""
+        if not self._using_gpu:
+            return False
+            
+        try:
+            # Check GPU capability
+            if torch.cuda.is_available():
+                device_capability = torch.cuda.get_device_capability(self._device)
+                # bfloat16 is supported on Ampere (8.0+) and newer architectures
+                return device_capability[0] >= 8
+            return False
+        except Exception as e:
+            logger.warning(f"Could not determine mixed precision support: {e}")
+            return False
+
 
 class RadioOutputProcessor(fout.OutputProcessor):
     """Output processor for RADIO models that handles embeddings output."""
