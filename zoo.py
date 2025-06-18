@@ -114,8 +114,10 @@ class TorchRadioModel(fout.TorchImageModel):
             img = img.convert('RGB')
         
         # Convert to tensor and normalize to [0, 1]
-        x = pil_to_tensor(img).to(dtype=torch.float32, device=self._device)
+        # Make sure to put tensor on the correct device from the start
+        x = pil_to_tensor(img).to(dtype=torch.float32)
         x.div_(255.0)  # RADIO expects values between 0 and 1
+        x = x.to(self._device)  # Move to device after preprocessing
         
         return x
 
@@ -125,8 +127,10 @@ class TorchRadioModel(fout.TorchImageModel):
         # Preprocess images if needed
         if self._preprocess and self._transforms is not None:
             imgs = [self._transforms(img) for img in imgs]
+            # Ensure all tensors are on the correct device
+            imgs = [img.to(self._device) if isinstance(img, torch.Tensor) else img for img in imgs]
         else:
-            # Apply our custom preprocessing
+            # Apply our custom preprocessing (already handles device placement)
             imgs = [self._preprocess_image(img) for img in imgs]
 
         # Process each image individually due to dynamic resizing
@@ -134,6 +138,10 @@ class TorchRadioModel(fout.TorchImageModel):
         spatial_features_list = []
         
         for img in imgs:
+            # Ensure tensor is on the correct device
+            if isinstance(img, torch.Tensor):
+                img = img.to(self._device)
+            
             # Add batch dimension if needed
             if img.dim() == 3:
                 img = img.unsqueeze(0)
