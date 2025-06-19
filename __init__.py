@@ -2,7 +2,7 @@ import os
 import torch
 import logging
 from fiftyone.operators import types
-from .zoo import TorchRadioModelConfig, TorchRadioModel
+from .zoo import TorchRadioModelConfig, TorchRadioModel, RadioOutputProcessor, SpatialHeatmapOutputProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -112,11 +112,11 @@ def load_model(
     if output_type == "summary":
         # For embeddings
         config_dict["as_feature_extractor"] = True
-        config_dict["output_processor_cls"] = "zoo.RadioOutputProcessor"
+        config_dict["output_processor_cls"] = RadioOutputProcessor
         config_dict["output_processor_args"] = {"output_type": output_type}
     elif output_type == "spatial":
         # For heatmaps
-        config_dict["output_processor_cls"] = "zoo.SpatialHeatmapOutputProcessor"
+        config_dict["output_processor_cls"] = SpatialHeatmapOutputProcessor
         config_dict["output_processor_args"] = {
             "apply_smoothing": kwargs.get("apply_smoothing", True),
             "smoothing_sigma": kwargs.get("smoothing_sigma", 1.51),
