@@ -6,7 +6,7 @@ This repository provides FiftyOne integration for C-RADIO models from NVIDIA Lab
 
 ## 🚀 Features
 
-- **Multiple Model Variants**: Support for all RADIO model sizes (C-RADIOv3-B/L/H/g, E-RADIO v2)
+- **Multiple Model Variants**: Support for all RADIO model sizes (C-RADIOv3-B/L/H/g)
 - **Dual Output Types**: Extract global summary embeddings or spatial attention features
 - **Attention Heatmaps**: Visualize what regions the model focuses on
 - **FiftyOne Integration**: Seamless integration with FiftyOne's computer vision workflows
@@ -79,14 +79,14 @@ spatial_model = foz.load_zoo_model(
 ### Feature Formats
 
 ```python
-# Computer vision format (recommended for spatial features)
+# returns a 1D embedding vector, dimensions 3048
 model = foz.load_zoo_model(
     "nv_labs/c-radio_v3-h",
     output_type="summary",
     feature_format="NCHW"  # "NCHW": [Batch, Channels, Height, Width] , or you can use "NLC":[Batch, Num_patches, Channels]
 )
 
-# Transformer format
+# returns spatial features which are parsed as a FiftyOne Heatmap
 model = foz.load_zoo_model(
     "nv_labs/c-radio_v3-h",
     output_type="spatial", 
